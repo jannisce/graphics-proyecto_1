@@ -23,6 +23,13 @@ Ejemplo: http://mgvez.github.io/jsorrery/
 ### GitHub
 [GitHub, click here](readme-media/solar-system.mov)
 
+## Controls
+
+| Action             | Control                                                                |
+| ----------------- | ------------------------------------------------------------------ |
+| Movement | WASD |
+| Camera | ARROWS |
+
 #### Rúbrica
 
 | Puntos | Descripción                     |
