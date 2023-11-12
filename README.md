@@ -7,6 +7,9 @@ Ejemplo: http://mgvez.github.io/jsorrery/
 - Los planetas deben trasladarse en una órbita (puede ser circular) y deben rotar sobre su eje.
 - Implementar una cámara que se pueda mover entre los modelos de planetas.
 
+# Sistema solar creado
+![img1](readme-media/solar-system.png)
+
 #### Rúbrica
 
 | Puntos | Descripción                     |
@@ -15,3 +18,8 @@ Ejemplo: http://mgvez.github.io/jsorrery/
 | `20 pts`      | Performance de la escena completa. No es necesario mantener 60 frames por segundo |
 | `50 pts`      | Puntos por cada planeta / estrella / luna en el sistema |
 | `10 pts`      | Crear un skybox que muestre estrellas en el horizonte |
+| `10 pts`      | Implementar condicionales que eviten que la nave/camara atraviese los elementos de su sistema solar |
+| `10 pts`      | 40 puntos por implementar movimiento 3D para la cámara |
+
+**Total:** 130 pts
+
