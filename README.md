@@ -1,4 +1,4 @@
-# graphics-proyecto_1
+# Proyecto 1: Space Travel
 Simulación del sistema solar usando un software renderer diseñado por mí. 
 Ejemplo: http://mgvez.github.io/jsorrery/
 
