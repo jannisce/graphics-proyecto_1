@@ -48,3 +48,13 @@ struct Color {
     // Friend function to allow float * Color
     friend Color operator*(float factor, const Color& color);
 };
+
+Color MixColors(const Color& color1, const Color& color2, float t) {
+    t = glm::clamp(t, 0.0f, 1.0f); // Asegura que t esté en el rango [0, 1]
+    return Color(
+            static_cast<uint8_t>((1.0f - t) * color1.r + t * color2.r),
+            static_cast<uint8_t>((1.0f - t) * color1.g + t * color2.g),
+            static_cast<uint8_t>((1.0f - t) * color1.b + t * color2.b),
+            static_cast<uint8_t>((1.0f - t) * color1.a + t * color2.a)
+    );
+}
