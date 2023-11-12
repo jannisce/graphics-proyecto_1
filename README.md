@@ -16,8 +16,12 @@ Ejemplo: http://mgvez.github.io/jsorrery/
   Your browser does not support the video tag.
 </video>
 
-**Enlace a mi video** 
-[Click aqui](readme-media/solar-system.mov)
+## Enlace a mi video
+### Google Drive
+[Drive, click here](https://drive.google.com/file/d/1ZO75MglFVBxHXOX_xPy2GjZR97yV-Mby/view?usp=sharing)
+
+### GitHub
+[GitHub, click here](readme-media/solar-system.mov)
 
 #### Rúbrica
 
