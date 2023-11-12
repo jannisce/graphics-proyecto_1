@@ -11,4 +11,7 @@ Ejemplo: http://mgvez.github.io/jsorrery/
 
 | Puntos | Descripción                     |
 | :-------- | :-------------------------------- |
-| `0 pts`      | ... |
+| `30 pts`      | Estética, escena del sistema solar bonita |
+| `20 pts`      | Performance de la escena completa. No es necesario mantener 60 frames por segundo |
+| `50 pts`      | Puntos por cada planeta / estrella / luna en el sistema |
+| `10 pts`      | Crear un skybox que muestre estrellas en el horizonte |

@@ -334,7 +334,7 @@ int main(int argc, char* args[]) {
     bool quit = false;
 
     // Genera estrellas aleatorias en un rango más grande que la cámara
-    std::vector<Star> stars = generateStars(100000, -2000, 2000, -2000, 2000, 100, 255);
+    std::vector<Star> stars = generateStars(18000, -1000, 2500, -1000, 2500, 20, 250);
     glm::vec3 moveVector; // Declarar moveVector aquí
 
     while (!quit) {
