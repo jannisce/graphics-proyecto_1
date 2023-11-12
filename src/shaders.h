@@ -1,431 +1,299 @@
-#pragma once
-#include <glm/geometric.hpp>
-#include <glm/glm.hpp>
-#include "uniforms.h"
+#include "glm/glm.hpp"
+#include "uniform.h"
 #include "fragment.h"
-#include "noise.h"
-#include "print.h"
+#include "color.h"
+#include "vertex.h"
+#include "FastNoiseLite.h"
+#include "framebuffer.h"
+#include <cstdlib> 
+#pragma once
 
-Vertex vertexShader(const Vertex &vertex, const Uniforms &uniforms)
-{
-  // Apply transformations to the input vertex using the matrices from the uniforms
-  glm::vec4 clipSpaceVertex = uniforms.projection * uniforms.view * uniforms.model * glm::vec4(vertex.position, 1.0f);
+enum Shaders{
+    sol,
+    tierra,
+    neptuno,
+    marte,
+    jupiter,
+    mercurio,
+};
 
-  // Perspective divide
-  glm::vec3 ndcVertex = glm::vec3(clipSpaceVertex) / clipSpaceVertex.w;
+struct Planeta{
+    Uniform uniform;
+    std::vector<Vertex>* vertex;
+    Shaders shader;
+};
 
-  // Apply the viewport transform
-  glm::vec4 screenVertex = uniforms.viewport * glm::vec4(ndcVertex, 1.0f);
-
-  // Transform the normal
-  glm::vec3 transformedNormal = glm::mat3(uniforms.model) * vertex.normal;
-  transformedNormal = glm::normalize(transformedNormal);
-
-  glm::vec3 transformedWorldPosition = glm::vec3(uniforms.model * glm::vec4(vertex.position, 1.0f));
-
-  // Return the transformed vertex as a vec3
-  return Vertex{
-      glm::vec3(screenVertex),
-      transformedNormal,
-      vertex.tex,
-      transformedWorldPosition,
-      vertex.position};
+Vertex vertexShader(const Vertex& vertex, const Uniform& uniform) {
+    glm::vec4 transformedVertex = uniform.viewport * uniform.projection * uniform.view * uniform.model * glm::vec4(vertex.position, 1.0f);
+    glm::vec3 vertexRedux;
+    vertexRedux.x = transformedVertex.x / transformedVertex.w;
+    vertexRedux.y = transformedVertex.y / transformedVertex.w;
+    vertexRedux.z = transformedVertex.z / transformedVertex.w;
+    Color fragmentColor(255, 0, 0, 255);
+    glm::vec3 normal = glm::normalize(glm::mat3(uniform.model) * vertex.normal);
+    Fragment fragment;
+    fragment.position = glm::ivec2(transformedVertex.x, transformedVertex.y);
+    fragment.color = fragmentColor;
+    return Vertex {vertexRedux, normal, vertex.tex, vertex.position};
 }
 
-Fragment foliageShader(Fragment &fragment)
-{
 
-  glm::vec3 neon1 = glm::vec3(0.48f, 0.0f, 0.61f);
-  glm::vec3 neon2 = glm::vec3(0.02f, 0.0f, 0.28f);
-  glm::vec3 neon3 = glm::vec3(0.46f, 0.31f, 0.55f);
-  glm::vec3 neon4 = glm::vec3(0.620f, 0.678f, 0.200f);
-  glm::vec3 neon5 = glm::vec3(0.733f, 0.0f, 0.180f);
+Color fragmentShaderTierra(Fragment& fragment) {
+    Color groundColor(34, 139, 34);
+    Color oceanColor(0, 0, 139);
+    Color cloudColor(255, 255, 255);
 
-  // Declare the color variable
-  glm::vec3 c = neon1; // Default color
+    glm::vec2 uv = glm::vec2(fragment.original.x, fragment.original.y);
 
-  // Convert 3D position on sphere to 2D UV
-  glm::vec3 pos = glm::normalize(fragment.originalPos);
-  float u = 0.5f + atan2(pos.z, pos.x) / (4.0f * glm::pi<float>());
-  float v = 0.5f - asin(pos.y) / glm::pi<float>();
-  glm::vec2 uv = glm::vec2(u, v);
+    FastNoiseLite noiseGenerator;
+    noiseGenerator.SetNoiseType(FastNoiseLite::NoiseType_OpenSimplex2);
 
-  uv = glm::clamp(uv, 0.0f, 1.0f);
+    float ox = 1100.0f;
+    float oy = 2800.0f;
+    float zoom = 80.0f; // Ajusta el valor según tu preferencia
 
-  // Reflejar las coordenadas UV respecto al centro para girar 180 grados
-  uv = glm::vec2(1.0f - uv.x, 1.0f - uv.y);
+    float noiseValue = noiseGenerator.GetNoise((uv.x + ox) * zoom, (uv.y + oy) * zoom);
 
-  // Set up the noise generator
-  FastNoiseLite noiseGenerator;
-  noiseGenerator.SetNoiseType(FastNoiseLite::NoiseType_OpenSimplex2);
+    FastNoiseLite noiseGenerator2;
+    noiseGenerator2.SetNoiseType(FastNoiseLite::NoiseType_OpenSimplex2);
 
-  float offsetX = 800.0f;
-  float offsetY = 1600.0f;
-  float scale = 900.0f;
+    float ox2 = 3000.0f;
+    float oy2 = 5000.0f;
+    float zoom2 = 450.0f; // Ajusta el valor para nubes más pequeñas
 
-  // Genera el valor de ruido
-  float noiseValue = noiseGenerator.GetNoise((uv.x + offsetX) * scale, (uv.y + offsetY) * scale);
-  noiseValue = (noiseValue + 1.0f) * 0.5f;
+    float noiseValue2 = noiseGenerator2.GetNoise((uv.x + ox2) * zoom2, (uv.y + oy2) * zoom2);
 
-  noiseValue = glm::smoothstep(0.0f, 1.0f, noiseValue);
+    // Combinar los dos niveles de ruido
+    noiseValue = (noiseValue + noiseValue2) * 1.0f; // Ajusta el factor de mezcla según tus preferencias
 
-  c = glm::mix(c, neon2, noiseValue);
+    Color tmpColor = (noiseValue < 0.5f) ? oceanColor : groundColor;
 
-  // Blend with neon color
-  c = glm::mix(c, neon2, 0.5f);
+    float oxc = 5800.0f;
+    float oyc = 6500.0f;
+    float zoomc = 1000.0f;
 
-  // Apply lighting intensity
-  c = c * fragment.intensity;
+    float noiseValueC = noiseGenerator.GetNoise((uv.x + oxc) * zoomc, (uv.y + oyc) * zoomc);
 
-  // Convert glm::vec3 color to your Color class
-  fragment.color = Color(c.r, c.g, c.b);
+    if (noiseValueC > 0.7f) { // Ajusta el umbral para nubes más pequeñas
+        tmpColor = cloudColor;
+    }
 
-  return fragment;
+    fragment.color = tmpColor * fragment.z * fragment.intensity;
+
+    return fragment.color;
+
 }
 
-Fragment gasCloudShader(Fragment &fragment)
-{
-  Color color;
-  glm::vec3 mainColor = glm::vec3(0.2f, 0.8f, 1.0f);
-  glm::vec3 secondColor = glm::vec3(0.0f, 0.6f, 0.6f);
-  glm::vec3 thirdColor = glm::vec3(0.8f, 1.0f, 0.9f);
+// Color fragmentShaderMarte(Fragment& fragment) {
+//     // Base color of the sun (amarillo)
+//     Color baseColorYellow(240, 200, 0); // Color en formato Color (RGB)
 
-  glm::vec2 uv = glm::vec2(fragment.originalPos.x * 2.0 - 1.0, fragment.originalPos.y * 2.0 - 1.0);
 
-  // Frecuencia y amplitud de las ondas en el planeta
-  float frequency = 28.0; // Ajusta la frecuencia de las líneas
-  float amplitude = 0.08; // Ajusta la amplitud de las líneas
+//     // Otro color (rojo)
+//     Color baseColorRed(255, 0, 0);
 
-  FastNoiseLite noiseGenerator;
-  noiseGenerator.SetNoiseType(FastNoiseLite::NoiseType_Cellular);
+//     // Coeficiente de mezcla entre los dos colores (0.0 para amarillo puro, 1.0 para rojo puro)
+//     float mixFactor = 0.5; // Puedes ajustar este valor según tus preferencias
 
-  float offsetX = 800.0f;
-  float offsetY = 200.0f;
-  float scale = 1000.0f;
+//     // Aplica un gradiente desde el centro hacia el borde para dar una sensación de profundidad
+//     float distanceFromCenter = glm::length(fragment.original);
+//     float gradientFactor = 5.0f - distanceFromCenter;
 
-  // Genera el valor de ruido
-  float noiseValue = noiseGenerator.GetNoise((uv.x + offsetX) * scale, (uv.y + offsetY) * scale);
-  noiseValue = (noiseValue + 1.0f) * 0.5f;
+//     // Aplica un factor de intensidad para ajustar el brillo
+//     float intensity = 0.5f;
 
-  // aplicar ruido como hacer piedras
-  noiseValue = glm::smoothstep(0.0f, 1.0f, noiseValue);
+//     // Combina los dos colores manualmente
+//     Color mixedColor;
+//     mixedColor.r = (1.0 - mixFactor) * baseColorYellow.r + mixFactor * baseColorRed.r;
+//     mixedColor.g = (1.0 - mixFactor) * baseColorYellow.g + mixFactor * baseColorRed.g;
+//     mixedColor.b = (1.0 - mixFactor) * baseColorYellow.b + mixFactor * baseColorRed.b;
 
-  // Interpola entre el color base y el color secundario basado en el valor de ruido
-  secondColor = glm::mix(mainColor, secondColor, noiseValue);
+//     // Combina el color mezclado con el gradiente y la intensidad
+//     Color sunColor = mixedColor * gradientFactor * intensity;
 
-  // Calcula el valor sinusoide para crear líneas
-  float sinValue = glm::sin(uv.y * frequency) * amplitude;
+//     fragment.color = sunColor;
 
-  // Combina el color base con las líneas sinusoide
-  secondColor = secondColor + glm::vec3(sinValue);
+//     glm::vec2 uv = glm::vec2(fragment.original.x, fragment.original.y);
+//     FastNoiseLite noiseGenerator;
+//     noiseGenerator.SetNoiseType(FastNoiseLite::NoiseType_OpenSimplex2);
 
-  color = Color(secondColor.x, secondColor.y, secondColor.z);
+//     float ox = 500.0f;
+//     float oy = 500.0f;
+//     float zoom = 5000.0f;
 
-  fragment.color = color * fragment.intensity;
+//     float noiseValue = noiseGenerator.GetNoise((uv.x + ox) * zoom, (uv.y + oy) * zoom);
 
-  return fragment;
+//     FastNoiseLite noiseGenerator2;
+//     noiseGenerator2.SetNoiseType(FastNoiseLite::NoiseType_OpenSimplex2);
+
+//     float ox2 = 3000.0f;
+//     float oy2 = 5000.0f;
+//     float zoom2 = 5000.0f; // Ajusta el valor para nubes más pequeñas
+
+//     float noiseValue2 = noiseGenerator2.GetNoise((uv.x + ox2) * zoom2, (uv.y + oy2) * zoom2);
+
+//     // Combinar los dos niveles de ruido
+//     noiseValue = (noiseValue + noiseValue2) * 10.0f; // Ajusta el factor de mezcla según tus preferencias
+
+//     Color tmpColor = (noiseValue < 0.5f) ? baseColorRed: sunColor;
+
+//     if (noiseValue > 0.5){
+//         tmpColor = sunColor;
+//     }
+
+//     fragment.color = tmpColor * fragment.z * fragment.intensity;
+
+//     return fragment.color;
+// }
+
+
+// Fragment shader para el sol
+Color fragmentShaderSol(Fragment& fragment) {
+    // Base color del sol (amarillo)
+    Color baseColorYellow(235, 00, 0);
+
+    // Color de la textura de fuego (rojo)
+    Color fireColor(255, 236, 0); // Ajusta este color a tu preferencia de rojo
+
+    // Coeficiente de mezcla entre el color base y la textura de fuego
+    float mixFactor = 0.03; // Ajusta según tus preferencias
+
+    // Distancia desde el centro para el gradiente
+    float distanceFromCenter = length(fragment.original);
+    float gradientFactor = 50.0 - distanceFromCenter;
+
+    // Intensidad para ajustar el brillo
+    float intensity = 1.2;
+
+    // Mezcla entre el color base y la textura de fuego
+    Color mixedColor;
+    mixedColor.r = (1.0 - mixFactor) * baseColorYellow.r + mixFactor * fireColor.r;
+    mixedColor.g = (1.0 - mixFactor) * fireColor.g + mixFactor * fireColor.g;
+    mixedColor.b = (1.0 - mixFactor) * baseColorYellow.b + mixFactor * baseColorYellow.b;
+
+    // Aplica el gradiente, la intensidad y el color base mezclado
+    Color sunColor = mixedColor * gradientFactor * intensity;
+
+    // Obtén las coordenadas UV del fragmento
+    float uvX = fragment.original.x;
+    float uvY = fragment.original.y;
+
+    // Parámetros para el ruido
+    float noiseScale = 0.3; // Ajusta según tus preferencias
+    float noiseIntensity = 0.06; // Ajusta según tus preferencias
+
+    // Genera ruido para la textura de fuego
+    FastNoiseLite noiseGenerator;
+    noiseGenerator.SetNoiseType(FastNoiseLite::NoiseType_OpenSimplex2);
+    float noiseValue = noiseGenerator.GetNoise((uvX + 500.0) * 500.0, (uvY + 3000.0) * 500.0) * noiseScale;
+    float noiseValue2 = noiseGenerator.GetNoise((uvX + 300.0) * 500.0, (uvY + 5000.0) * 500.0) * (noiseScale * 0.2);
+
+    // Combinación de los dos niveles de ruido
+    noiseValue = (noiseValue + noiseValue2) * 0.05; // Ajusta según tus preferencias
+
+    // Mezcla entre el color base y la textura de fuego según el valor de ruido
+    Color finalColor = sunColor * (1.0 - noiseValue) + fireColor * noiseValue;
+
+    // Aplica la intensidad y la profundidad del fragmento
+    fragment.color = finalColor * fragment.z * intensity;
+
+    return fragment.color;
 }
 
-Fragment solarShader(Fragment &fragment)
-{
-  Color color;
+Color fragmentShaderRandom(Fragment& fragment) {
+    // Color de la textura de fuego (rojo)
+    Color fireColor(250, 230, 10); // Ajusta este color a tu preferencia de rojo
 
-  glm::vec3 mainColor = glm::vec3(0.3f, 0.0f, 0.0f);
-  glm::vec3 secondColor = glm::vec3(0.9f, 0.4f, 0.04f);
-  glm::vec3 thirdColor = glm::vec3(0.5f, 0.25f, 0.0f);
+    // Distancia desde el centro para el gradiente
+    float distanceFromCenter = length(fragment.original);
+    float gradientFactor = 1.0 - distanceFromCenter;
 
-  glm::vec2 uv = glm::vec2(fragment.originalPos.x * 2.0 - 1.0, fragment.originalPos.y * 2.0 - 1.0);
+    // Intensidad para ajustar el brillo
+    float intensity = 1.0;
+    // Aplica el gradiente, la intensidad y el color base mezclado
+    Color sunColor = fireColor * gradientFactor * intensity;
 
-  FastNoiseLite noiseGenerator;
-  noiseGenerator.SetNoiseType(FastNoiseLite::NoiseType_Cellular);
+    // Obtén las coordenadas UV del fragmento
+    float uvX = fragment.original.x;
+    float uvY = fragment.original.y;
 
-  float offsetX = 7000.0f;
-  float offsetY = 9000.0f;
-  float scale = 1400.0f;
+    // Parámetros para el ruido
+    float noiseScale = 0.3; // Ajusta según tus preferencias
 
-  // Genera el valor de ruido
-  float noiseValue = noiseGenerator.GetNoise((uv.x + offsetX) * scale, (uv.y + offsetY) * scale);
-  noiseValue = (noiseValue + 1.0f) * 0.7f;
+    // Genera ruido para la textura de fuego
+    FastNoiseLite noiseGenerator;
+    noiseGenerator.SetNoiseType(FastNoiseLite::NoiseType_OpenSimplex2);
+    float noiseValue = noiseGenerator.GetNoise((uvX + 5000.0) * 300.0, (uvY + 2000.0) * 300.0) * noiseScale;
+    float noiseValue2 = noiseGenerator.GetNoise((uvX + 3000.0) * 300.0, (uvY + 5000.0) * 300.0) * (noiseScale * 0.5);
 
-  // aplicar un resplandor a las orillas de la esfera
-  noiseValue = glm::smoothstep(0.1f, 1.0f, noiseValue);
+    // Combinación de los dos niveles de ruido
+    noiseValue = (noiseValue + noiseValue2) * 0.5; // Ajusta según tus preferencias
 
-  // Interpola entre el color base y el color secundario basado en el valor de ruido
-  secondColor = glm::mix(mainColor, secondColor, noiseValue);
+    // Mezcla entre el color base y la textura de fuego según el valor de ruido
+    Color finalColor = sunColor * (1.0 - noiseValue) + fireColor * noiseValue;
 
-  if (noiseValue > 0.2f)
-  {
-    // Calcula el valor sinusoide para crear líneas
-    float sinValue = glm::sin(uv.y * 17.0f) * 0.1f;
+    // Aplica la intensidad y la profundidad del fragmento
+    fragment.color = finalColor * fragment.z * intensity;
 
-    sinValue = glm::smoothstep(0.4f, 1.0f, sinValue);
-
-    // Combina el color base con las líneas sinusoide
-    secondColor = secondColor + glm::vec3(sinValue);
-  }
-
-  // Interpola entre el color base y el color secundario basado en el valor de ruido
-  thirdColor = glm::mix(secondColor, thirdColor, noiseValue);
-
-  // Interpola entre el color base y el color secundario basado en el valor de ruido
-  mainColor = glm::mix(thirdColor, mainColor, noiseValue);
-
-  // Interpola entre el color base y el color secundario basado en el valor de ruido
-  secondColor = glm::mix(mainColor, secondColor, noiseValue);
-
-  color = Color(secondColor.x, secondColor.y, secondColor.z);
-
-  fragment.color = color * fragment.intensity;
-
-  return fragment;
+    return fragment.color;
 }
 
-Fragment terrainShader(Fragment &fragment)
-{
-  // Define the colors
-  glm::vec3 spotColorGreen = glm::vec3(0.132f, 0.555f, 0.127f); // Forest green
-  glm::vec3 spotColorBlue = glm::vec3(0.1f, 0.1f, 0.50f);       // Blue
-  glm::vec3 earthColorLightGreen = glm::vec3(0.0f, 0.32f, 0.22f);
-  glm::vec3 earthColorBrown = glm::vec3(0.74f, 0.41f, 0.22f); // Brown for earth
-  glm::vec3 cloudColor = glm::vec3(1.0f, 1.0f, 1.0f);         // White
+Color fragmentShaderNeptuno(Fragment& fragment) {
+    // Intensidad de las líneas
+    float lineIntensity = 1.0; // Ajusta según tus preferencias
 
-  // Convert 3D position on sphere to 2D UV
-  glm::vec3 pos = glm::normalize(fragment.originalPos);
-  float u = 0.5f + atan2(pos.z, pos.x) / (2.0f * glm::pi<float>());
-  float v = 0.5f - asin(pos.y) / glm::pi<float>();
-  glm::vec2 uv = glm::vec2(u, v);
+    // Número de líneas
+    int numLines = 4; // Ajusta según tus preferencias
 
-  uv = glm::clamp(uv, 0.0f, 1.0f);
+    // Color de Neptuno (azul cian oscuro)
+    Color neptuneColor(0, 60, 140);
+    Color black(0, 0, 102);
 
-  // Set up the noise generator
-  FastNoiseLite noiseGenerator;
-  noiseGenerator.SetNoiseType(FastNoiseLite::NoiseType_OpenSimplex2);
+    // Calcula la posición vertical normalizada en el rango [0, 1]
+    float normalizedY = (fragment.original.y + 1.0) * 1.0;
 
-  float ox = 110.0f;
-  float oy = 3500.0f;
-  float z = 559.0f;
+    // Calcula el patrón de líneas horizontales
+    float linePattern = glm::fract(normalizedY * numLines);
 
-  // Generate the noise value
-  float noiseValue = noiseGenerator.GetNoise((uv.x + ox) * z, (uv.y + oy) * z);
+    // Aplica el efecto de líneas difuminadas
+    float blur = 1.0 - abs(linePattern - 0.5) * 1.2
+    ;
+    blur = pow(blur, lineIntensity);
 
-  glm::vec3 c;
+    // Combina el color de Neptuno con el efecto de líneas difuminadas
+    Color finalColor = neptuneColor * blur + black * (1.0 - blur);
 
-  if (noiseValue < 0.4f)
-  {
-    // Water
-    c = glm::mix(spotColorBlue, earthColorLightGreen, noiseValue);
-    c = glm::smoothstep(glm::vec3(0.0f), glm::vec3(0.9f), c);
-  }
-  else if (noiseValue < 0.6f)
-  {
-    // Earth/Brown
-    c = earthColorLightGreen;
-  }
-  else if (noiseValue < 0.8f)
-  {
-    // Land/Green
-    c = spotColorGreen;
-  }
-  else if (noiseValue < 0.9f)
-  {
-    // Land/Green
-    c = earthColorBrown;
-  }
-  else
-  {
-    // dejar azul
-    c = spotColorBlue;
-  }
+    fragment.color = finalColor;
 
-  float cloudNoise = noiseGenerator.GetNoise((uv.x + ox) * z * 0.5f, (uv.y + oy) * z * 0.5f);
-  cloudNoise = (cloudNoise + 1.0f) * 0.35f;
-  cloudNoise = glm::smoothstep(0.0f, 1.0f, cloudNoise);
-
-  // Interpolate between the cloud color and the planet color based on the cloud noise
-  c = glm::mix(c, cloudColor, cloudNoise);
-
-  // Convert glm::vec3 color to your Color class
-  fragment.color = Color(c.r, c.g, c.b);
-
-  return fragment;
+    return fragment.color;
 }
 
-Fragment sphereShader(Fragment &fragment)
-{
+Color fragmentShaderJupiter(Fragment& fragment) {
+    // Intensidad de las líneas
+    float lineIntensity = 1.0; // Ajusta según tus preferencias
 
-  Color color;
+    // Número de líneas
+    int numLines = 10; // Ajusta según tus preferencias
 
-  glm::vec3 mainColor = glm::vec3(0.7f, 0.2f, 0.6f);
-  glm::vec3 secondColor = glm::vec3(0.5f, 0.2f, 0.5f);
-  glm::vec3 thirdColor = glm::vec3(0.5f, 0.5f, 0.1f);
+    // Color de Neptuno (azul cian oscuro)
+    Color neptuneColor(160, 180, 90);
+    Color black(55, 55, 55);
 
-  glm::vec2 uv = glm::vec2(fragment.originalPos.x * 2.0 - 1.0, fragment.originalPos.y * 2.0 - 1.0);
+    // Calcula la posición vertical normalizada en el rango [0, 1]
+    float normalizedY = (fragment.original.y + 1.0) * 1.0;
 
-  FastNoiseLite noiseGenerator;
-  noiseGenerator.SetNoiseType(FastNoiseLite::NoiseType_OpenSimplex2);
+    // Calcula el patrón de líneas horizontales
+    float linePattern = glm::fract(normalizedY * numLines);
 
-  float offsetX = 15000.0f;
-  float offsetY = 1200.0f;
-  float scale = 700.0f;
+    // Aplica el efecto de líneas difuminadas
+    float blur = 1.0 - abs(linePattern - 0.5) * 1.5;
+    blur = pow(blur, lineIntensity);
 
-  // Genera el valor de ruido
-  float noiseValue = noiseGenerator.GetNoise((uv.x + offsetX) * scale, (uv.y + offsetY) * scale);
-  noiseValue = (noiseValue + 1.0f) * 0.5f;
+    // Combina el color de Neptuno con el efecto de líneas difuminadas
+    Color finalColor = neptuneColor * blur + black * (1.0 - blur);
 
-  // aplicar un resplandor a las orillas de la esfera
-  noiseValue = glm::smoothstep(0.0f, 1.2f, noiseValue);
+    fragment.color = finalColor;
 
-  // Interpola entre el color base y el color secundario basado en el valor de ruido
-  secondColor = glm::mix(mainColor, secondColor, noiseValue);
-
-  if (noiseValue > 0.5f)
-  {
-    // hacer que las orillas sean mas brillantes
-    secondColor = secondColor + glm::vec3(0.1f);
-
-    // Calcula el valor sinusoide para crear líneas
-    float sinValue = glm::sin(uv.y * 25.0f) * 0.1f;
-
-    sinValue = glm::smoothstep(0.8f, 1.0f, sinValue);
-  }
-  else
-  {
-    // Calcula el valor sinusoide para crear líneas
-    float sinValue = glm::sin(uv.y * 47.0f) * 0.1f;
-
-    sinValue = glm::smoothstep(0.1f, 1.0f, sinValue);
-
-    // Combina el color base con las líneas sinusoide
-    secondColor = secondColor + glm::vec3(sinValue);
-  }
-
-  // Interpola entre el color base y el color secundario basado en el valor de ruido
-  mainColor = glm::mix(thirdColor, mainColor, noiseValue);
-
-  // Interpola entre el color base y el color secundario basado en el valor de ruido
-  secondColor = glm::mix(mainColor, secondColor, noiseValue);
-
-  color = Color(secondColor.x, secondColor.y, secondColor.z);
-
-  fragment.color = color * fragment.intensity;
-
-  return fragment;
+    return fragment.color;
 }
 
-Fragment vibrantShader(Fragment &fragment)
-{
-
-  glm::vec3 cloudColor = glm::vec3(1.0f, 1.0f, 1.0f); // White
-  glm::vec3 spotColorGreen = glm::vec3(0.8f, 0.0f, 0.9f);
-  glm::vec3 spotColorBlue = glm::vec3(0.140f, 0.140f, 0.140f);
-  glm::vec3 earthColorLightGreen = glm::vec3(0.3f, 1.0f, 0.6f);
-  glm::vec3 earthColorBrown = glm::vec3(0.6f, 0.7f, 0.2f);
-  glm::vec3 neon5 = glm::vec3(0.7f, 0.0f, 0.2f);
-
-  // Convert 3D position on sphere to 2D UV
-  glm::vec3 pos = glm::normalize(fragment.originalPos);
-  float u = 0.5f + atan2(pos.z, pos.x) / (4.0f * glm::pi<float>());
-  float v = 0.5f - asin(pos.y) / glm::pi<float>();
-  glm::vec2 uv = glm::vec2(u, v);
-
-  uv = glm::clamp(uv, 0.0f, 1.0f);
-
-  // Set up the noise generator
-  FastNoiseLite noiseGenerator;
-  noiseGenerator.SetNoiseType(FastNoiseLite::NoiseType_OpenSimplex2);
-
-  float ox = 150000.0f;
-  float oy = 1500.0f;
-  float z = 3000.0f;
-
-  // Generate the noise value
-  float noiseValue = noiseGenerator.GetNoise((uv.x + ox) * z, (uv.y + oy) * z);
-
-  glm::vec3 c;
-
-  if (noiseValue < 0.4f)
-  {
-    // Water
-    c = glm::mix(spotColorBlue, earthColorLightGreen, noiseValue);
-    c = glm::smoothstep(glm::vec3(0.0f), glm::vec3(0.9f), c);
-  }
-  else if (noiseValue < 0.6f)
-  {
-    // Earth/Brown
-    c = earthColorLightGreen;
-  }
-  else if (noiseValue < 0.8f)
-  {
-    // Land/Green
-    c = spotColorGreen;
-  }
-  else if (noiseValue < 0.9f)
-  {
-    // Land/Green
-    c = earthColorBrown;
-  }
-  else
-  {
-    // dejar azul
-    c = spotColorBlue;
-  }
-
-  float cloudNoise = noiseGenerator.GetNoise((uv.x + ox) * z * 0.5f, (uv.y + oy) * z * 0.5f);
-  cloudNoise = (cloudNoise + 0.70f) * 0.3f;
-  cloudNoise = glm::smoothstep(0.0f, 1.0f, cloudNoise);
-
-  // Interpolate between the cloud color and the planet color based on the cloud noise
-  c = glm::mix(c, cloudColor, cloudNoise);
-
-  // Convert glm::vec3 color to your Color class
-  fragment.color = Color(c.r, c.g, c.b);
-
-  return fragment;
-}
-
-Fragment nightSkyShader(Fragment &fragment)
-{
-  Color color;
-
-  glm::vec3 mainColor = glm::vec3(0.130f, 0.130f, 0.130f);   // Color RGB (1, 1, 1)
-  glm::vec3 secondColor = glm::vec3(0.730f, 0.730f, 0.730f); // Color RGB (0, 0, 0)
-
-  glm::vec2 uv = glm::vec2(fragment.originalPos.x * 2.0 - 1.0, fragment.originalPos.y * 2.0 - 1.0);
-
-  FastNoiseLite noiseGenerator;
-  noiseGenerator.SetNoiseType(FastNoiseLite::NoiseType_Perlin);
-
-  float offsetX = 8000.0f;
-  float offsetY = 1000.0f;
-  float scale = 40.0f;
-
-  // Genera el valor de ruido
-  float noiseValue = noiseGenerator.GetNoise((uv.x + offsetX) * scale, (uv.y + offsetY) * scale);
-  noiseValue = (noiseValue + 1.0f) * 0.9f;
-
-  // Interpola entre el color base y el color secundario basado en el valor de ruido
-  secondColor = glm::mix(mainColor, secondColor, noiseValue);
-
-  if (noiseValue > 0.99f)
-  {
-    // Calcula el valor sinusoide para crear líneas
-    float sinValue = glm::sin(uv.y * 20.0f) * 0.1f;
-
-    sinValue = glm::smoothstep(0.8f, 1.0f, sinValue);
-
-    // Combina el color base con las líneas sinusoide
-    secondColor = secondColor + glm::vec3(sinValue);
-  }
-
-  // Interpola entre el color base y el color secundario basado en el valor de ruido
-  mainColor = glm::mix(mainColor, mainColor, noiseValue);
-
-  // Interpola entre el color base y el color secundario basado en el valor de ruido
-  secondColor = glm::mix(mainColor, secondColor, noiseValue);
-
-  color = Color(secondColor.x, secondColor.y, secondColor.z);
-
-  fragment.color = color;
-
-  return fragment;
-}

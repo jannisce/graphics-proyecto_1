@@ -1,362 +1,494 @@
 #include <SDL2/SDL.h>
-#include <SDL2/SDL_events.h>
 #include <iostream>
 #include <glm/glm.hpp>
-#include <glm/gtc/matrix_transform.hpp>
-#include <sstream>
 #include <vector>
-#include <cassert>
+#include <glm/ext/matrix_transform.hpp>
+#include "face.h"
 #include "color.h"
-#include "print.h"
-#include "framebuffer.h"
-#include "uniforms.h"
-#include "shaders.h"
 #include "fragment.h"
+#include "line.h"
+#include "loadOBJ.h"
 #include "triangle.h"
-#include "camera.h"
-#include "ObjLoader.h"
-#include "noise.h"
-#include "model.h"
+#include "uniform.h"
+#include "vertex.h"
+#include "shaders.h"
+#include "framebuffer.h"
 
-SDL_Window *window = nullptr;
-SDL_Renderer *renderer = nullptr;
-Color currentColor;
+float x = 3.14f / 3.0f;
 
-std::vector<Model> models;
+Color clearColor = {0, 0, 0, 255};
+Color currentColor = {255, 255, 255, 255};
+Color color_a(255, 0, 0, 255); // Red color
+Color color_b(0, 255, 0, 255); // Green color
+Color color_c(0, 0, 255, 255); // Blue color
 
-bool init()
-{
-  if (SDL_Init(SDL_INIT_VIDEO) != 0)
-  {
-    std::cerr << "Error: Failed to initialize SDL: " << SDL_GetError() << std::endl;
-    return false;
-  }
+SDL_Window* window;
+Uniform uniform;
+Uniform uniform2;
+Uniform uniform4;
+Uniform uniform5;
+Uniform uniform6;
 
-  window = SDL_CreateWindow("LAB 4", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, SCREEN_WIDTH, SCREEN_HEIGHT, SDL_WINDOW_SHOWN);
-  if (!window)
-  {
-    std::cerr << "Error: Failed to create SDL window: " << SDL_GetError() << std::endl;
-    return false;
-  }
+Planeta planeta1;
+Planeta planeta2;
+Planeta planeta4;
+Planeta planeta5;
+Planeta planeta6;
 
-  renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
-  if (!renderer)
-  {
-    std::cerr << "Error: Failed to create SDL renderer: " << SDL_GetError() << std::endl;
-    return false;
-  }
+struct Star {
+    glm::vec3 position;
+    uint8_t brightness;
+};
 
-  setupNoise();
+std::array<double, WINDOW_WIDTH * WINDOW_HEIGHT> zBuffer;
 
-  return true;
+glm::vec3 L = glm::vec3(0, 0, 400.0f); // Configura la dirección de la luz según tus necesidades
+
+struct Camera {
+    glm::vec3 cameraPosition;
+    glm::vec3 targetPosition;
+    glm::vec3 upVector;
+};
+
+void clear(SDL_Color color) {
+    SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
+    SDL_RenderClear(renderer);
 }
 
-void setColor(const Color &color)
-{
-  currentColor = color;
+Color interpolateColor(const glm::vec3& barycentricCoord, const Color& color_a, const Color& color_b, const Color& color_c) {
+    float u = barycentricCoord.x;
+    float v = barycentricCoord.y;
+    float w = barycentricCoord.z;
+
+    // Realiza una interpolación lineal para cada componente del color
+    uint8_t r = static_cast<uint8_t>(u * color_a.r + v * color_b.r + w * color_c.r);
+    uint8_t g = static_cast<uint8_t>(u * color_a.g + v * color_b.g + w * color_c.g);
+    uint8_t b = static_cast<uint8_t>(u * color_a.b + v * color_b.b + w * color_c.b);
+    uint8_t a = static_cast<uint8_t>(u * color_a.a + v * color_b.a + w * color_c.a);
+
+    return Color(r, g, b, a);
 }
 
-void render()
-{
-  for (const auto &model : models)
-  {
-    // 1. Vertex Shader
-    std::vector<Vertex> transformedVertices(model.vertices.size() / 3);
-    for (size_t i = 0; i < model.vertices.size() / 3; ++i)
-    {
-      Vertex vertex = {model.vertices[3 * i], model.vertices[3 * i + 1], model.vertices[3 * i + 2]};
-      transformedVertices[i] = vertexShader(vertex, model.uniforms);
-    }
+bool isBarycentricCoord(const glm::vec3& barycentricCoord) {
+    return barycentricCoord.x >= 0 && barycentricCoord.y >= 0 && barycentricCoord.z >= 0 &&
+           barycentricCoord.x <= 1 && barycentricCoord.y <= 1 && barycentricCoord.z <= 1 &&
+           glm::abs(1 - (barycentricCoord.x + barycentricCoord.y + barycentricCoord.z)) < 0.00001f;
+}
 
-    // 2. Primitive Assembly
-    std::vector<std::vector<Vertex>> assembledVertices(transformedVertices.size() / 3);
-    for (size_t i = 0; i < transformedVertices.size() / 3; ++i)
-    {
-      Vertex edge1 = transformedVertices[3 * i];
-      Vertex edge2 = transformedVertices[3 * i + 1];
-      Vertex edge3 = transformedVertices[3 * i + 2];
-      assembledVertices[i] = {edge1, edge2, edge3};
-    }
+glm::vec3 calculateBarycentricCoord(const glm::vec2& A, const glm::vec2& B, const glm::vec2& C, const glm::vec2& P) {
+    float denominator = (B.y - C.y) * (A.x - C.x) + (C.x - B.x) * (A.y - C.y);
+    float u = ((B.y - C.y) * (P.x - C.x) + (C.x - B.x) * (P.y - C.y)) / denominator;
+    float v = ((C.y - A.y) * (P.x - C.x) + (A.x - C.x) * (P.y - C.y)) / denominator;
+    float w = 1 - u - v;
+    return glm::vec3(u, v, w);
+}
 
-    // 3. Rasterization
+std::vector<Fragment> triangle(const Vertex& a, const Vertex& b, const Vertex& c) {
     std::vector<Fragment> fragments;
 
-    for (size_t i = 0; i < assembledVertices.size(); ++i)
-    {
-      std::vector<Fragment> rasterizedTriangle = triangle(
-          assembledVertices[i][0],
-          assembledVertices[i][1],
-          assembledVertices[i][2]);
-      fragments.insert(fragments.end(), rasterizedTriangle.begin(), rasterizedTriangle.end());
-    }
 
-    // 4. Fragment Shader
-    for (size_t i = 0; i < fragments.size(); ++i)
-    {
-      Fragment (*fragmentShader)(Fragment &) = nullptr;
+    // Calculate the bounding box of the triangle
+    int minX = static_cast<int>(std::min({a.position.x, b.position.x, c.position.x}));
+    int minY = static_cast<int>(std::min({a.position.y, b.position.y, c.position.y}));
+    int maxX = static_cast<int>(std::max({a.position.x, b.position.x, c.position.x}));
+    int maxY = static_cast<int>(std::max({a.position.y, b.position.y, c.position.y}));
 
-      switch (model.currentShader)
-      {
-      case FOLIAGE:
-        fragmentShader = foliageShader;
-        break;
-      case GAS_CLOUD:
-        fragmentShader = gasCloudShader;
-        break;
-      case SOLAR:
-        fragmentShader = solarShader;
-        break;
-      case TERRAIN:
-        fragmentShader = terrainShader;
-        break;
-      case SPHERE:
-        fragmentShader = sphereShader;
-        break;
-      case VIBRANT:
-        fragmentShader = vibrantShader;
-        break;
-      case NIGHT_SKY:
-        fragmentShader = nightSkyShader;
-        break;
-      default:
-        std::cerr << "Error: Shader no reconocido." << std::endl;
-        break;
-      }
-      const Fragment &fragment = fragmentShader(fragments[i]);
+    // Iterate over each point in the bounding box
+    for (int y = minY; y <= maxY; ++y) {
+        for (int x = minX; x <= maxX; ++x) {
+            glm::vec2 pixelPosition(static_cast<float>(x) + 0.5f, static_cast<float>(y) + 0.5f); // Central point of the pixel
+            glm::vec3 barycentricCoord = calculateBarycentricCoord(a.position, b.position, c.position, pixelPosition);
 
-      point(fragment);
-    }
-  }
-}
+            if (isBarycentricCoord(barycentricCoord)) {
+                Color p {0, 0, 0};
+                // Interpolate attributes (color, depth, etc.) using barycentric coordinates
+                Color interpolatedColor = interpolateColor(barycentricCoord, p, p, p);
 
-glm::mat4 createViewportMatrix(size_t screenWidth, size_t screenHeight)
-{
-  glm::mat4 viewport = glm::mat4(1.0f);
+                // Calculate the interpolated Z value using barycentric coordinates
+                float interpolatedZ = barycentricCoord.x * a.position.z + barycentricCoord.y * b.position.z + barycentricCoord.z * c.position.z;
 
-  // Scale
-  viewport = glm::scale(viewport, glm::vec3(screenWidth / 2.0f, screenHeight / 2.0f, 0.5f));
+                // Create a fragment with the position, interpolated attributes, and Z coordinate
+                Fragment fragment;
+                fragment.position = glm::ivec2(x, y);
+                fragment.color = interpolatedColor;
+                fragment.z = interpolatedZ;
 
-  // Translate
-  viewport = glm::translate(viewport, glm::vec3(1.0f, 1.0f, 0.5f));
-
-  return viewport;
-}
-
-int main(int argc, char *argv[])
-{
-
-  // ShaderType currentShader = FOLIAGE;
-
-  int shaderChoice;
-
-  // Pide al usuario que elija un ShaderType
-  std::cout << "Elige un ShaderType:" << std::endl;
-  std::cout << "0 - FOLIAGE" << std::endl;
-  std::cout << "1 - GAS_CLOUD" << std::endl;
-  std::cout << "2 - SOLAR" << std::endl;
-  std::cout << "3 - TERRAIN" << std::endl;
-  std::cout << "4 - SPHERE" << std::endl;
-  std::cout << "5 - VIBRANT" << std::endl;
-  std::cout << "6 - NIGHT_SKY" << std::endl;
-
-  std::cin >> shaderChoice;
-
-  // Verifica la selección del usuario y establece el ShaderType correspondiente
-  ShaderType currentShader;
-  switch (shaderChoice)
-  {
-  case 0:
-    currentShader = FOLIAGE;
-    break;
-  case 1:
-    currentShader = GAS_CLOUD;
-    break;
-  case 2:
-    currentShader = SOLAR;
-    break;
-  case 3:
-    currentShader = TERRAIN;
-    break;
-  case 4:
-    currentShader = SPHERE;
-    break;
-  case 5:
-    currentShader = VIBRANT;
-    break;
-  case 6:
-    currentShader = NIGHT_SKY;
-    break;
-  default:
-    std::cout << "Selección no válida. Se establecerá FOLIAGE por defecto." << std::endl;
-    currentShader = FOLIAGE;
-    break;
-  }
-
-  int generateModel2;
-  std::cout << "¿Deseas generar la luna? (1 para Sí, 0 para No): ";
-  std::cin >> generateModel2;
-
-  if (!init())
-  {
-    return 1;
-  }
-
-  std::vector<glm::vec3> vertices;
-  std::vector<glm::vec3> normals;
-  std::vector<glm::vec3> texCoords;
-  std::vector<Face> faces;
-  std::vector<glm::vec3> vertexBufferObject; // This will contain both vertices and normals
-
-  // loadOBJ("../models/sphere.obj", vertices, normals, texCoords, faces);
-  loadOBJ("/Users/jannisce/Documents/GitHub/graphics-lab_4/models/sphere.obj", vertices, normals, texCoords, faces);
-
-  for (const auto &face : faces)
-  {
-    for (int i = 0; i < 3; ++i)
-    {
-      // Get the vertex position
-      glm::vec3 vertexPosition = vertices[face.vertexIndices[i]];
-
-      // Get the normal for the current vertex
-      glm::vec3 vertexNormal = normals[face.normalIndices[i]];
-
-      // Get the texture for the current vertex
-      glm::vec3 vertexTexture = texCoords[face.texIndices[i]];
-
-      // Add the vertex position and normal to the vertex array
-      vertexBufferObject.push_back(vertexPosition);
-      vertexBufferObject.push_back(vertexNormal);
-      vertexBufferObject.push_back(vertexTexture);
-    }
-  }
-
-  Uniforms uniforms;
-
-  glm::mat4 model = glm::mat4(1);
-  glm::mat4 view = glm::mat4(1);
-  glm::mat4 projection = glm::mat4(1);
-
-  glm::vec3 translationVector(0.0f, 0.0f, 0.0f);
-  float a = 45.0f;
-  glm::vec3 rotationAxis(0.0f, 1.0f, 0.0f); // Rotate around the Y-axis
-  glm::vec3 scaleFactor(1.0f, 1.0f, 1.0f);
-
-  glm::mat4 translation = glm::translate(glm::mat4(1.0f), translationVector);
-
-  glm::mat4 scale = glm::scale(glm::mat4(1.0f), scaleFactor);
-
-  // Initialize a Camera object
-  Camera camera;
-  camera.cameraPosition = glm::vec3(0.0f, 0.0f, 3.0f);
-  camera.targetPosition = glm::vec3(0.0f, 0.0f, 0.0f);
-  camera.upVector = glm::vec3(0.0f, 1.0f, 0.0f);
-
-  // Projection matrix
-  float fovInDegrees = 45.0f;
-  float aspectRatio = static_cast<float>(SCREEN_WIDTH) / static_cast<float>(SCREEN_HEIGHT); // Assuming a screen resolution of 800x600
-  float nearClip = 0.1f;
-  float farClip = 100.0f;
-  uniforms.projection = glm::perspective(glm::radians(fovInDegrees), aspectRatio, nearClip, farClip);
-
-  // Viewport matrix
-  uniforms.viewport = createViewportMatrix(SCREEN_WIDTH, SCREEN_HEIGHT);
-  Uint32 frameStart, frameTime;
-  std::string title = "FPS: ";
-  int speed = 10;
-
-  bool running = true;
-  while (running)
-  {
-    frameStart = SDL_GetTicks();
-
-    models.clear(); // Clear models vector at the beginning of the loop
-
-    a += 1;
-    glm::mat4 rotation = glm::rotate(glm::mat4(1.0f), glm::radians(a), rotationAxis);
-
-    // Calculate the model matrix
-    uniforms.model = translation * rotation * scale;
-
-    // Create the view matrix using the Camera object
-    uniforms.view = glm::lookAt(
-        camera.cameraPosition, // The position of the camera
-        camera.targetPosition, // The point the camera is looking at
-        camera.upVector        // The up vector defining the camera's orientation
-    );
-
-    // Model 1
-    Model model1;
-    model1.modelMatrix = glm::mat4(1);
-    model1.vertices = vertexBufferObject;
-    model1.uniforms = uniforms;
-    model1.currentShader = currentShader;
-    models.push_back(model1); // Add model1 to models vector
-
-    // Model 2: smaller and placed next to the first model
-    Model model2;
-    model2.modelMatrix = glm::mat4(1);
-    model2.vertices = vertexBufferObject;
-    model2.currentShader = NIGHT_SKY;
-    model2.uniforms = uniforms;
-    model2.uniforms.model = glm::translate(model2.uniforms.model, glm::vec3(1.5f, 0.0f, 0.0f)) * glm::scale(model2.uniforms.model, glm::vec3(0.2f, 0.2f, 0.2f));
-    if (generateModel2)
-    {
-      models.push_back(model2); // Add model2 to models vector only if the user chooses to generate it
-    }
-    SDL_Event event;
-    while (SDL_PollEvent(&event))
-    {
-      if (event.type == SDL_QUIT)
-      {
-        running = false;
-      }
-
-      if (event.type == SDL_KEYDOWN)
-      {
-        switch (event.key.keysym.sym)
-        {
-        case SDLK_SPACE:
-          currentShader = static_cast<ShaderType>((currentShader + 1) % 7);
-          std::cout << "Shader: " << currentShader << std::endl;
-          break;
-        case SDLK_LEFT:
-          camera.cameraPosition.x += -speed;
-          break;
-        case SDLK_RIGHT:
-          camera.cameraPosition.x += speed;
-          break;
-        case SDLK_UP:
-          camera.cameraPosition.y += -speed;
-          break;
-        case SDLK_DOWN:
-          camera.cameraPosition.y += speed;
-          break;
+                fragments.push_back(fragment);
+            }
         }
-      }
     }
 
-    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
-    SDL_RenderClear(renderer);
-    clearFramebuffer();
+    return fragments;
+}
 
-    render();
-
-    renderBuffer(renderer);
-
-    frameTime = SDL_GetTicks() - frameStart;
-
-    // Calculate frames per second and update window title
-    if (frameTime > 0)
-    {
-      std::ostringstream titleStream;
-      titleStream << "LAB #4 - FPS: " << 1000.0 / frameTime; // Milliseconds to seconds
-      SDL_SetWindowTitle(window, titleStream.str().c_str());
+std::vector<Star> generateStars(int numStars, int minX, int maxX, int minY, int maxY, uint8_t minBrightness, uint8_t maxBrightness) {
+    std::vector<Star> stars;
+    for (int i = 0; i < numStars; ++i) {
+        int x = rand() % (maxX - minX + 1) + minX;
+        int y = rand() % (maxY - minY + 1) + minY;
+        uint8_t brightness = rand() % (maxBrightness - minBrightness + 1) + minBrightness;
+        stars.push_back({glm::vec3(x, y, 0), brightness});
     }
-  }
+    return stars;
+}
 
-  SDL_DestroyRenderer(renderer);
-  SDL_DestroyWindow(window);
-  SDL_Quit();
+glm::mat4 createModelMatrix(glm::vec3 matrixTranslation, glm::vec3 matrixRotation, float radianSpeed) {
+    static float rotationSpeed = 4.0f;  // Ajusta la velocidad de rotación aquí
+    glm::mat4 translation = glm::translate(glm::mat4(1), matrixTranslation);
+    glm::mat4 scale = glm::scale(glm::mat4(1), glm::vec3(0.4f, 0.6f, 1.0f));
+    glm::mat4 rotation = glm::rotate(glm::mat4(1), glm::radians((x += rotationSpeed) * radianSpeed), glm::vec3(0.0f, -1.0f, 0.0f)); // Solo en el eje vertical
+    return translation * scale * rotation;
+}
 
-  return 0;
+glm::mat4 createModelMatrixSol(glm::vec3 matrixTranslation, glm::vec3 matrixRotation, float radianSpeed) {
+    static float rotationSpeed = 2.5f;  // Ajusta la velocidad de rotación aquí
+    glm::mat4 translation = glm::translate(glm::mat4(1), matrixTranslation);
+    glm::mat4 scale = glm::scale(glm::mat4(1), glm::vec3(1.0f, 1.4f, 2.2f));
+    glm::mat4 rotation = glm::rotate(glm::mat4(1), glm::radians((x += rotationSpeed) * radianSpeed), glm::vec3(0.0f, 1.0f, 0.0f)); // Solo en el eje vertical
+    return translation * scale * rotation;
+}
+
+glm::vec3 calculatePosition(float rotation, float radius){
+    float positionX = glm::cos(rotation) * radius;
+    float positionZ = glm::sin(rotation) * radius;
+    return glm::vec3(positionX, 0.0f, positionZ);
+}
+
+
+glm::mat4 createProjectionMatrix() {
+    float fovInDegrees = 45.0f;
+    float aspectRatio = WINDOW_WIDTH / WINDOW_HEIGHT;
+    float nearClip = 0.1f;
+    float farClip = 100.0f;
+    return glm::perspective(glm::radians(fovInDegrees), aspectRatio, nearClip, farClip);
+}
+
+glm::mat4 createViewportMatrix() {
+    glm::mat4 viewport = glm::mat4(1.0f);
+    // Scale
+    viewport = glm::scale(viewport, glm::vec3(WINDOW_WIDTH / 2.0f, WINDOW_HEIGHT / 1.5f, 1.5f));
+    // Translate
+    viewport = glm::translate(viewport, glm::vec3(1.0f, 0.75f, 1.0f));
+    return viewport;
+}
+
+glm::mat4 createViewMatrix(glm::vec3 cameraPosition, glm::vec3 targetPosition, glm::vec3 upVector){
+    return glm::lookAt(
+            cameraPosition,
+            targetPosition,
+            upVector
+            );
+}
+
+void render(const std::vector<Vertex>& vertexArray,  const Uniform& uniform, int planeta) {
+    std::vector<Vertex> transformedVertexArray;
+    for (const auto& vertex : vertexArray) {
+        auto transformedVertex = vertexShader(vertex, uniform);
+        transformedVertexArray.push_back(transformedVertex);
+    }
+
+    for (size_t i = 0; i < transformedVertexArray.size(); i += 3) {
+        const Vertex& a = transformedVertexArray[i];
+        const Vertex& b = transformedVertexArray[i + 1];
+        const Vertex& c = transformedVertexArray[i + 2];
+
+        glm::vec3 A = a.position;
+        glm::vec3 B = b.position;
+        glm::vec3 C = c.position;
+
+        glm::vec3 edge1 = B - A;
+        glm::vec3 edge2 = C - A;
+        glm::vec3 normal = glm::normalize(glm::cross(edge1, edge2));
+
+        // Bounding box para el triangulo
+        int minX = static_cast<int>(std::min({A.x, B.x, C.x}));
+        int minY = static_cast<int>(std::min({A.y, B.y, C.y}));
+        int maxX = static_cast<int>(std::max({A.x, B.x, C.x}));
+        int maxY = static_cast<int>(std::max({A.y, B.y, C.y}));
+
+        // Iterating
+        for (int y = minY; y <= maxY; ++y) {
+            for (int x = minX; x <= maxX; ++x) {
+                if (y>0 && y<WINDOW_HEIGHT && x>0 && x<WINDOW_WIDTH) {
+                    glm::vec2 pixelPosition(static_cast<float>(x) + 0.5f, static_cast<float>(y) + 0.5f); // Central point of the pixel
+                    glm::vec3 barycentricCoord = calculateBarycentricCoord(A, B, C, pixelPosition);
+
+                    if (isBarycentricCoord(barycentricCoord)) {
+                        Color barycentricColor {0, 0, 0};
+                        Color interpolatedColor = interpolateColor(barycentricCoord, barycentricColor, barycentricColor, barycentricColor);
+
+                        float depth = barycentricCoord.x * A.z + barycentricCoord.y * B.z + barycentricCoord.z * C.z;
+
+                        glm::vec3 normal = a.normal * barycentricCoord.x + b.normal * barycentricCoord.y+ c.normal * barycentricCoord.z;
+                        glm::vec3 original = a.original * barycentricCoord.x + b.original * barycentricCoord.y + c.original * barycentricCoord.z;
+
+                        // Calculate the position 'P' of the fragment
+                        glm::vec3 P = glm::vec3(glm::vec3 (0.0f,0.0f,1.0f));
+                        glm::vec3 lightDirection = glm::normalize(L - P);
+
+                        Fragment fragment;
+
+                        // Calculate the intensity of the light using Lambertian attenuation
+                        float intensity = glm::dot(normal, lightDirection);
+                        fragment.intensity = intensity;
+
+                        if (intensity <= 0){
+                            continue;
+                        }
+
+                        Color finalColor = interpolatedColor * intensity;
+                        fragment.position = glm::ivec2(x, y);
+                        fragment.color = finalColor;
+                        fragment.z = depth;
+                        fragment.original = original;
+
+                        int index = y * WINDOW_WIDTH + x;
+                        if (depth < zBuffer[index]) {
+                            // Apply fragment shader to calculate final color
+                            Color fragmentShaderf; //= fragmentShaderJupiter(fragment);
+
+                            switch(planeta){
+                                case sol:
+                                    fragmentShaderf = fragmentShaderSol(fragment);
+                                    SDL_SetRenderDrawColor(renderer, fragmentShaderf.r, fragmentShaderf.g, fragmentShaderf.b, fragmentShaderf.a);
+                                    break;
+                                case mercurio:
+                                    fragmentShaderf = fragmentShaderRandom(fragment);
+                                    SDL_SetRenderDrawColor(renderer, fragmentShaderf.r, fragmentShaderf.g, fragmentShaderf.b, fragmentShaderf.a);
+                                    break;
+                                case tierra:
+                                    fragmentShaderf = fragmentShaderTierra(fragment);
+                                    SDL_SetRenderDrawColor(renderer, fragmentShaderf.r, fragmentShaderf.g, fragmentShaderf.b, fragmentShaderf.a);
+                                    break;
+                                case jupiter:
+                                    fragmentShaderf = fragmentShaderJupiter(fragment);
+                                    SDL_SetRenderDrawColor(renderer, fragmentShaderf.r, fragmentShaderf.g, fragmentShaderf.b, fragmentShaderf.a);
+                                    break;
+                                case neptuno:
+                                    fragmentShaderf = fragmentShaderNeptuno(fragment);
+                                    SDL_SetRenderDrawColor(renderer, fragmentShaderf.r, fragmentShaderf.g, fragmentShaderf.b, fragmentShaderf.a);
+                                    break;
+                            }
+
+                            SDL_RenderDrawPoint(renderer, x, WINDOW_HEIGHT-y);
+                            // Update the z-buffer value for this pixel
+                            zBuffer[index] = depth;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+
+int main(int argc, char* args[]) {
+    SDL_Init(SDL_INIT_VIDEO);
+    window = SDL_CreateWindow("Space Travel", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, WINDOW_WIDTH, WINDOW_HEIGHT, SDL_WINDOW_SHOWN);
+    renderer = SDL_CreateRenderer(window, -1, 0);
+
+    // Variables para el cálculo de FPS
+    int frameCount = 0;
+    double totalTime = 0.0;
+    int fps = 0;
+    auto startTime = std::chrono::high_resolution_clock::now();
+
+
+    int renderWidth, renderHeight;
+    SDL_GetRendererOutputSize(renderer, &renderWidth, &renderHeight);
+
+
+    srand(time(nullptr));
+
+    std::vector<glm::vec3> vertices;
+    std::vector<glm::vec3> normal;
+    std::vector<Face> faces;
+
+    if (!loadOBJ("models/sphere.obj", vertices, normal, faces)) {
+        std::cerr << "Error loading OBJ file." << std::endl;
+        return 1;
+    }
+
+    std::vector<Planeta> planetas;
+
+    float rotation = 0.0f;
+    float rotation2 = 0.0f;
+    float rotation3 = 0.0f;
+    float rotation4 = 0.0f;
+    float rotation5 = 0.0f;
+    float xRotate = 0.0f;
+    float yRotate = 0.0f;
+    float moveSpeed = 0.4f;
+
+    Camera camera;
+
+    glm::vec3 cameraPosition(0.0f, 0.0f, 20.0f);
+    glm::vec3 targetPosition(0.0f, 1.0f, 0.0f);
+    glm::vec3 upVector(0.0f, 0.5f, 0.0f);
+
+    L = cameraPosition - targetPosition;
+
+    std::vector<Vertex> vertexArray = setupVertexArray(vertices, normal, faces);
+
+    SDL_Event event;
+    bool quit = false;
+
+    // Genera estrellas aleatorias en un rango más grande que la cámara
+    std::vector<Star> stars = generateStars(100000, -2000, 2000, -2000, 2000, 100, 255);
+    glm::vec3 moveVector; // Declarar moveVector aquí
+
+    while (!quit) {
+        while (SDL_PollEvent(&event)) {
+            if (event.type == SDL_QUIT) {
+                quit = true;
+            } else if (event.type == SDL_KEYDOWN) {
+                switch (event.key.keysym.sym) {
+                    case SDLK_w:
+                        // Mueve la cámara hacia adelante limitando la distancia mínima
+                        moveVector = moveSpeed * glm::normalize(L); // Asignar el valor a moveVector
+                        if (glm::length(cameraPosition - targetPosition - moveVector) >= 1.0f) {
+                            cameraPosition -= moveVector;
+                            targetPosition -= moveVector;
+                        }
+                        break;
+                    case SDLK_s:
+                        // Mueve la cámara hacia atrás
+                        cameraPosition += moveSpeed * glm::normalize(L);
+                        targetPosition += moveSpeed * L;
+                        break;
+                    case SDLK_a:
+                        xRotate -= 1.0f;
+                        break;
+                    case SDLK_d:
+                        xRotate += 1.0f;
+                        break;
+                    case SDLK_RIGHT:
+                        xRotate += 1.0f;
+                        break;
+                    case SDLK_LEFT:
+                        xRotate -= 1.0f;
+                        break;
+                    case SDLK_UP:
+                        yRotate += 1.0f;
+                        break;
+                    case SDLK_DOWN:
+                        yRotate -= 1.0f;
+                        break;
+                }
+            }
+        }
+
+
+
+
+        planetas.clear();
+        rotation -= 0.022f;
+        rotation2 += 0.018f;
+        rotation3 -= 0.026f;
+        rotation4 += 0.022f;
+        rotation5 -= 0.028f;
+        targetPosition = glm::vec3(5.0f * sin(glm::radians(xRotate)) * cos(glm::radians(yRotate)), 5.0f * sin(glm::radians(yRotate)), -5.0f * cos(glm::radians(xRotate)) * cos(glm::radians(yRotate))) + cameraPosition;
+
+
+        glm::vec3 translationMatrixMercurio = calculatePosition(rotation, -1.5f);
+        glm::vec3 translationMatrixTierra = calculatePosition(rotation2, 2.5f);
+        glm::vec3 translationMatrixJupiter = calculatePosition(rotation4, -3.5f);
+        glm::vec3 translationMatrixNeptuno = calculatePosition(rotation5, 4.5f);
+
+        uniform.model = createModelMatrixSol(glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(1.0f, 1.0f, 1.0f), 0.2f);
+        uniform.view = createViewMatrix(cameraPosition, targetPosition, upVector);
+        uniform.projection = createProjectionMatrix();
+        uniform.viewport = createViewportMatrix();
+
+        planeta1.uniform = uniform;
+        planeta1.vertex = &vertexArray;
+        planeta1.shader = sol;
+
+        uniform4.model = createModelMatrix(translationMatrixMercurio, glm::vec3(1.0f, 1.0f, 1.0f), 0.2f);
+        uniform4.view = createViewMatrix(cameraPosition, targetPosition, upVector);
+        uniform4.viewport = createViewportMatrix();
+        uniform4.projection = createProjectionMatrix();
+
+        planeta4.uniform = uniform4;
+        planeta4.vertex = &vertexArray;
+        planeta4.shader = mercurio;
+
+        uniform2.model = createModelMatrix(translationMatrixTierra, glm::vec3(1.0f, 1.0f, 1.0f), 0.3f);
+        uniform2.view = createViewMatrix(cameraPosition, targetPosition, upVector);
+        uniform2.viewport = createViewportMatrix();
+        uniform2.projection = createProjectionMatrix();
+
+        planeta2.uniform = uniform2;
+        planeta2.vertex = &vertexArray;
+        planeta2.shader = tierra;
+
+        uniform5.model = createModelMatrix(translationMatrixJupiter, glm::vec3(1.0f, 1.0f, 1.0f), 0.4f);
+        uniform5.view = createViewMatrix(cameraPosition, targetPosition, upVector);
+        uniform5.viewport = createViewportMatrix();
+        uniform5.projection = createProjectionMatrix();
+
+        planeta5.uniform= uniform5;
+        planeta5.vertex = &vertexArray;
+        planeta5.shader = jupiter;
+
+        uniform6.model = createModelMatrix(translationMatrixNeptuno, glm::vec3(1.0f, 1.0f, 1.0f), 0.4f);
+        uniform6.view = createViewMatrix(cameraPosition, targetPosition, upVector);
+        uniform6.viewport = createViewportMatrix();
+        uniform6.projection = createProjectionMatrix();
+
+        planeta6.uniform= uniform6;
+        planeta6.vertex = &vertexArray;
+        planeta6.shader = neptuno;
+        
+        planetas.push_back(planeta1);
+        planetas.push_back(planeta2);
+        planetas.push_back(planeta4);
+        planetas.push_back(planeta5);
+        planetas.push_back(planeta6);
+        
+        SDL_SetRenderDrawColor(renderer, clearColor.r, clearColor.g, clearColor.b, clearColor.a);
+        SDL_RenderClear(renderer);
+
+        // Clear z-buffer at the beginning of each frame
+        std::fill(zBuffer.begin(), zBuffer.end(), std::numeric_limits<double>::max());
+
+        // Dibuja las estrellas en el fondo
+        for (const Star& star : stars) {
+            SDL_SetRenderDrawColor(renderer, star.brightness, star.brightness, star.brightness, 255);
+            SDL_RenderDrawPoint(renderer, star.position.x, star.position.y);
+        }
+
+        // Llamada a la función render para cada planeta
+        for(const Planeta& planeta : planetas){
+            render(*planeta.vertex, planeta.uniform, planeta.shader);
+        }
+
+        SDL_RenderPresent(renderer);
+
+        // Calcula el tiempo transcurrido en este fotograma
+        auto endTime = std::chrono::high_resolution_clock::now();
+        double frameTime = std::chrono::duration<double>(endTime - startTime).count();
+        startTime = endTime;
+
+        // Actualiza el tiempo total y el recuento de fotogramas
+        totalTime += frameTime;
+        frameCount++;
+
+        // Si ha pasado un segundo, calcula los FPS y actualiza el título de la ventana
+        if (totalTime >= 1.0) {
+            fps = static_cast<int>(frameCount);  // Convierte el recuento de fotogramas a entero
+            frameCount = 0;
+            totalTime = 0.0;
+
+            // Actualiza el título de la ventana con los FPS
+            std::string windowTitle = "Space Travel - FPS: " + std::to_string(fps);
+            SDL_SetWindowTitle(window, windowTitle.c_str());
+        }
+    }
+
+    SDL_DestroyRenderer(renderer);
+    SDL_DestroyWindow(window);
+    SDL_Quit();
+
+    return 0;
 }

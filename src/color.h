@@ -1,7 +1,7 @@
-#pragma once
 #include <SDL2/SDL.h>
-#include <algorithm>
-#include <iostream>
+#include <SDL_stdinc.h>
+
+#pragma once
 
 struct Color {
     Uint8 r;
@@ -9,44 +9,26 @@ struct Color {
     Uint8 b;
     Uint8 a;
 
-    Color() : r(0), g(0), b(0), a(255) {}
+    Color(Uint8 red = 0, Uint8 green = 0, Uint8 blue = 0, Uint8 alpha = 255)
+            : r(red), g(green), b(blue), a(alpha) {}
 
-    Color(int red, int green, int blue, int alpha = 255) {
-        r = static_cast<Uint8>(std::min(std::max(red, 0), 255));
-        g = static_cast<Uint8>(std::min(std::max(green, 0), 255));
-        b = static_cast<Uint8>(std::min(std::max(blue, 0), 255));
-        a = static_cast<Uint8>(std::min(std::max(alpha, 0), 255));
+    Color operator*(float scalar) const {
+        Color result;
+        result.r = static_cast<uint8_t>(r * scalar);
+        result.g = static_cast<uint8_t>(g * scalar);
+        result.b = static_cast<uint8_t>(b * scalar);
+        result.a = static_cast<uint8_t>(a * scalar);
+        return result;
     }
 
-    Color(float red, float green, float blue, float alpha = 1.0f) {
-        r = static_cast<Uint8>(std::min(std::max(red * 255, 0.0f), 255.0f));
-        g = static_cast<Uint8>(std::min(std::max(green * 255, 0.0f), 255.0f));
-        b = static_cast<Uint8>(std::min(std::max(blue * 255, 0.0f), 255.0f));
-        a = static_cast<Uint8>(std::min(std::max(alpha * 255, 0.0f), 255.0f));
-    }
-
-    // Overload the + operator to add colors
     Color operator+(const Color& other) const {
-        return Color(
-            std::min(255, int(r) + int(other.r)),
-            std::min(255, int(g) + int(other.g)),
-            std::min(255, int(b) + int(other.b)),
-            std::min(255, int(a) + int(other.a))
-        );
+        Color result;
+        result.r = static_cast<uint8_t>(r + other.r);
+        result.g = static_cast<uint8_t>(g + other.g);
+        result.b = static_cast<uint8_t>(b + other.b);
+        result.a = static_cast<uint8_t>(a + other.a);
+        return result;
     }
-
-    // Overload the * operator to scale colors by a factor
-    Color operator*(float factor) const {
-        return Color(
-            std::clamp(static_cast<Uint8>(r * factor), Uint8(0), Uint8(255)),
-            std::clamp(static_cast<Uint8>(g * factor), Uint8(0), Uint8(255)),
-            std::clamp(static_cast<Uint8>(b * factor), Uint8(0), Uint8(255)),
-            std::clamp(static_cast<Uint8>(a * factor), Uint8(0), Uint8(255))
-        );
-    }
-
-    // Friend function to allow float * Color
-    friend Color operator*(float factor, const Color& color);
 };
 
 Color MixColors(const Color& color1, const Color& color2, float t) {
@@ -58,3 +40,4 @@ Color MixColors(const Color& color1, const Color& color2, float t) {
             static_cast<uint8_t>((1.0f - t) * color1.a + t * color2.a)
     );
 }
+
