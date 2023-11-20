@@ -39,7 +39,7 @@ Ejemplo: http://mgvez.github.io/jsorrery/
 | `50 pts`              | Puntos por cada planeta / estrella / luna en el sistema |
 | `10 pts`              | Crear un skybox que muestre estrellas en el horizonte |
 | `10 pts`              | Implementar condicionales que eviten que la nave/camara atraviese los elementos de su sistema solar |
-| `10 pts`              | 40 puntos por implementar movimiento 3D para la cámara |
+| `40 pts`              | 40 puntos por implementar movimiento 3D para la cámara |
 
-**Total:** 130 pts
+**Total:** 160 pts
 
